@@ -7,9 +7,11 @@ defmodule Vsr.Application do
 
   @impl true
   def start(_type, _args) do
+     port = String.to_integer(System.fetch_env!("PORT"))
+
     children = [
-      # Starts a worker by calling: Vsr.Worker.start_link(arg)
-      # {Vsr.Worker, arg}
+      {Task.Supervisor, name: Vsr.TaskSupervisor},
+      Supervisor.child_spec({Task, fn -> Vsr.Server.accept(port) end}, restart: :permanent)
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html
