@@ -16,16 +16,18 @@ defmodule Vsr.Server do
   end
 
   defp serve(socket) do
-    socket
-    |> read_line()
-    |> write_line(socket)
+    Logger.info("Accepted connections: #{inspect(socket)}")
+    case read_line(socket) do
+      {:ok, data} ->
+        write_line(data, socket)
+        serve(socket)
+      _ -> Logger.debug("connection closed")
+    end
 
-    serve(socket)
   end
 
   defp read_line(socket) do
-    {:ok, data} = :gen_tcp.recv(socket, 0)
-    data
+    :gen_tcp.recv(socket, 0)
   end
 
   defp write_line(line, socket) do
