@@ -41,7 +41,7 @@ defmodule Vsr.Client do
 
   # Send by primary to replica.
   def commit(client, view_number, commit_number) do
-    GenServer.call(client, {:commit, Vsr.Message.commit(view_number, commit_number)})
+    GenServer.call(client, {:server_send, Vsr.Message.commit(view_number, commit_number)})
   end
 
   def handle_call({:request, op}, _from, state) do

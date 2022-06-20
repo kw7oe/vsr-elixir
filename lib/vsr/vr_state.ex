@@ -9,3 +9,10 @@ defmodule Vsr.VRState do
     status: :normal
   ]
 end
+
+defmodule Vsr.VRState.ClientInfo do
+  defstruct [
+    :last_result,
+    last_request_number: 0
+  ]
+end
