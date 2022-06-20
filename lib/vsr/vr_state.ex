@@ -6,7 +6,8 @@ defmodule Vsr.VRState do
     commit_number: 0,
     client_table: %{},
     view_number: 0,
-    status: :normal
+    status: :normal,
+    replicas: []
   ]
 end
 

@@ -10,7 +10,11 @@ defmodule Vsr.Server do
 
     Logger.info("Accepting connections on port #{port}")
 
-    loop_acceptor(socket, state)
+    replicas =
+      Application.get_env(:vsr, :ports, [])
+      |> Enum.reject(fn p -> p == port end)
+
+    loop_acceptor(socket, %{state | replicas: replicas})
   end
 
   defp loop_acceptor(socket, state) do
@@ -36,15 +40,12 @@ defmodule Vsr.Server do
   end
 
   defp handle_message(socket, state, {:request, op, client_id, request_number}) do
-    Logger.info("state: #{inspect(state)}")
-
-    client_info =
-      Map.get(state.client_table, client_id, %Vsr.VRState.ClientInfo{})
-      |> IO.inspect()
+    client_info = Map.get(state.client_table, client_id, %Vsr.VRState.ClientInfo{})
+    Logger.info(%{state: state, client_info: client_info})
 
     # Step 2
     state =
-      if request_number < client_info.last_request_number do
+      if request_number <= client_info.last_request_number do
         {last_request_number, result} = client_info.last_result
 
         if last_request_number == request_number do
@@ -56,22 +57,40 @@ defmodule Vsr.Server do
         state
       else
         # Step 3
+        op_number = state.op_number + 1
+        log = [op | state.log]
+
+        # This might be wrong:
+        commit_number = state.commit_number + 1
+
+        # Send <Prepare v, m, n, k> to other replicas
+        for port <- state.replicas do
+          Vsr.ReplicaClient.send_message(
+            port,
+            Vsr.Message.prepare(state.view_number, op, op_number, commit_number)
+          )
+        end
+
+        # Compute result
         result = "result#{request_number}"
 
-        Map.put(state.client_table, client_id, %Vsr.VRState.ClientInfo{
-          last_request_number: request_number,
-          last_result: {request_number, result}
-        })
+        client_table =
+          Map.put(state.client_table, client_id, %Vsr.VRState.ClientInfo{
+            last_request_number: request_number,
+            last_result: {request_number, result}
+          })
 
         write_line(socket, result)
 
-        %{state | op_number: state.op_number + 1}
+        # Update
+        %{state | client_table: client_table, op_number: op_number, log: log}
       end
 
     state
   end
 
-  defp handle_message(socket, _state, _) do
+  defp handle_message(socket, _state, message) do
+    Logger.info("receive unsupported message: #{inspect(message)}")
     write_line(socket, "unsupported message type")
   end
 
