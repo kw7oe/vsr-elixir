@@ -60,19 +60,36 @@ defmodule Vsr.Server do
         op_number = state.op_number + 1
         log = [op | state.log]
 
-        # This might be wrong:
-        commit_number = state.commit_number + 1
-
         # Send <Prepare v, m, n, k> to other replicas
+        #
+        # This should be asynchronous and fault tolerant.
+        #
+        # Failure to send to one replicae shouldn't cause
+        # the whole thing to failed.
         for port <- state.replicas do
-          Vsr.ReplicaClient.send_message(
-            port,
-            Vsr.Message.prepare(state.view_number, op, op_number, commit_number)
-          )
+          reply =
+            Vsr.ReplicaClient.send_message(
+              port,
+              Vsr.Message.prepare(
+                state.view_number,
+                {:request, op, client_id, request_number} |> :erlang.term_to_binary(),
+                op_number,
+                state.commit_number
+              )
+            )
+
+          Logger.info("received reply from replica #{port}: #{reply}")
         end
 
         # Compute result
         result = "result#{request_number}"
+
+        # Commit number is increment after primary excutes the operation
+        # by calling the service code.
+        commit_number = state.commit_number + 1
+
+        # Send <Reply v, s, x> to client
+        write_line(socket, Vsr.Message.reply(state.view_number, request_number, result))
 
         client_table =
           Map.put(state.client_table, client_id, %Vsr.VRState.ClientInfo{
@@ -80,13 +97,43 @@ defmodule Vsr.Server do
             last_result: {request_number, result}
           })
 
-        write_line(socket, result)
-
         # Update
-        %{state | client_table: client_table, op_number: op_number, log: log}
+        %{
+          state
+          | client_table: client_table,
+            op_number: op_number,
+            commit_number: commit_number,
+            log: log
+        }
       end
 
     state
+  end
+
+  # Commit number is included in prepare message to inform replica about
+  # the previous commit.
+  #
+  # If primary does not receive any client request in a timely way,
+  # it will instead inform the replica by sending a <Commit v, k> message.
+  defp handle_message(socket, state, {:prepare, view_number, message, _op_number, _commit_number}) do
+    # TODO:Check if log contain request up to op_number
+
+    op_number = state.op_number + 1
+    log = [message | state.log]
+
+    # Assuming, message is always <Request>
+    {_, _, client_id, request_number} = :erlang.binary_to_term(message)
+
+    client_table =
+      Map.put(state.client_table, client_id, %Vsr.VRState.ClientInfo{
+        last_request_number: request_number
+      })
+
+    # Send primary <PrepareOK, v, n, i>
+    message = Vsr.Message.prepare_ok(view_number, op_number, state.replica_number)
+    write_line(socket, message)
+
+    %{state | client_table: client_table, op_number: op_number, log: log}
   end
 
   defp handle_message(socket, _state, message) do
