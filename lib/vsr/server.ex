@@ -76,9 +76,12 @@ defmodule Vsr.Server do
 
         # Skip update client-table... since if we failed, the state won't be
         # stored as well.
-        #
+
         # To fix this, we need to store our state on a long running process.
         # Our current implementation pass the state around...
+
+        # port is 2f + 1, so we can calculate f through this formula
+        f = (length(state.replicas) - 1) / 2
 
         # Send <Prepare v, m, n, k> to other replicas
         #
@@ -86,20 +89,52 @@ defmodule Vsr.Server do
         #
         # Failure to send to one replicae shouldn't cause
         # the whole thing to failed.
-        for port <- state.replicas do
-          reply =
-            Vsr.ReplicaClient.send_message(
-              port,
-              Vsr.Message.prepare(
-                state.view_number,
-                message,
-                op_number,
-                state.commit_number
-              )
-            )
+        #
+        # Hence, we spawn a task with async_nolink:
+        tasks =
+          Enum.map(state.replicas, fn port ->
+            Task.Supervisor.async_nolink(Vsr.TaskSupervisor, fn ->
+              reply =
+                Vsr.ReplicaClient.send_message(
+                  port,
+                  Vsr.Message.prepare(
+                    state.view_number,
+                    message,
+                    op_number,
+                    state.commit_number
+                  )
+                )
 
-          Logger.info("received reply from replica #{port}: #{reply}")
+              Logger.info("received reply from replica #{port}: #{reply}")
+              reply
+            end)
+          end)
+
+        # We repeatly called yield with a timeout of 100 ms
+        # until we collected at least f results.
+        #
+        # TODO: Shutdown tasks that are not completed when
+        # we collected enough of f.
+        yield_many_until = fn tasks, count, results, func ->
+          results =
+            Task.yield_many(tasks, 100)
+            |> Enum.filter(fn {_, res} -> res end)
+            |> Enum.reduce(results, fn {_, {status, res}}, results ->
+              if status == :ok do
+                [res | results]
+              else
+                results
+              end
+            end)
+
+          if length(results) < f do
+            func.(tasks, count + 1, results, func)
+          else
+            {count + 1, results}
+          end
         end
+
+        {_count, _results} = yield_many_until.(tasks, 0, [], yield_many_until)
 
         # Step 5:
         #
