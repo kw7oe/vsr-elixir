@@ -1,4 +1,10 @@
 defmodule Vsr.Message do
+  def to_message(tuple) do
+    tuple
+    |> Tuple.to_list()
+    |> Enum.join(",")
+  end
+
   def request(op, c, s) do
     "request,#{op},#{c},#{s}"
   end
@@ -8,7 +14,7 @@ defmodule Vsr.Message do
   end
 
   def prepare(v, m, n, k) do
-    "prepare,#{v},#{m},#{n},#{k}"
+    "prepare\t#{v}\t#{m}\t#{n}\t#{k}"
   end
 
   def prepare_ok(v, n, i) do
@@ -20,9 +26,14 @@ defmodule Vsr.Message do
   end
 
   def parse(string) do
-    string
-    |> String.split(",")
-    |> do_parse()
+    splitted =
+      if String.starts_with?(string, "prepare\t") do
+        String.split(string, "\t")
+      else
+        String.split(string, ",")
+      end
+
+    do_parse(splitted)
   end
 
   defp do_parse(["request", op, c, s]) do

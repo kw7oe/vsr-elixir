@@ -39,7 +39,7 @@ defmodule Vsr.Server do
     state
   end
 
-  defp handle_message(socket, state, {:request, op, client_id, request_number}) do
+  defp handle_message(socket, state, {:request, _op, client_id, request_number} = request) do
     client_info = Map.get(state.client_table, client_id, %Vsr.VRState.ClientInfo{})
     Logger.info(%{state: state, client_info: client_info})
 
@@ -58,7 +58,8 @@ defmodule Vsr.Server do
       else
         # Step 3
         op_number = state.op_number + 1
-        log = [op | state.log]
+        message = Vsr.Message.to_message(request)
+        log = [to_log(op_number, message) | state.log]
 
         # Send <Prepare v, m, n, k> to other replicas
         #
@@ -72,7 +73,7 @@ defmodule Vsr.Server do
               port,
               Vsr.Message.prepare(
                 state.view_number,
-                {:request, op, client_id, request_number} |> :erlang.term_to_binary(),
+                message,
                 op_number,
                 state.commit_number
               )
@@ -115,30 +116,102 @@ defmodule Vsr.Server do
   #
   # If primary does not receive any client request in a timely way,
   # it will instead inform the replica by sending a <Commit v, k> message.
-  defp handle_message(socket, state, {:prepare, view_number, message, _op_number, _commit_number}) do
-    # TODO:Check if log contain request up to op_number
+  defp handle_message(socket, state, {:prepare, view_number, message, op_number, commit_number}) do
+    Logger.info(%{state: state, op_number: op_number, commit_number: commit_number})
+
+    # Commit
+    inspect_logs(state.log)
+    {commit_number, client_table} = commit(state, commit_number)
+
+    # Not sure if checking op number with commmit number is enough to ensure
+    # the following property:
+    #
+    #   > a backup won’t accept a prepare with op-number n until it
+    #     has entries for all earlier requests in its log.
+    if op_number - 1 != commit_number do
+      Logger.warn("does not contain all the earlier opereations yet...")
+
+      # TODO: Perform a state transfer or wait until earlier operations reach.
+    end
 
     op_number = state.op_number + 1
-    log = [message | state.log]
+    log = [to_log(op_number, message) | state.log]
 
-    # Assuming, message is always <Request>
-    {_, _, client_id, request_number} = :erlang.binary_to_term(message)
+    # We are assuming, message is always <Request>
+    request = Vsr.Message.parse(message)
+    {_, _, client_id, request_number} = request
 
     client_table =
-      Map.put(state.client_table, client_id, %Vsr.VRState.ClientInfo{
-        last_request_number: request_number
-      })
+      Map.update(
+        client_table,
+        client_id,
+        %Vsr.VRState.ClientInfo{
+          last_request_number: request_number
+        },
+        fn existing_client_info ->
+          %{existing_client_info | last_request_number: request_number}
+        end
+      )
 
     # Send primary <PrepareOK, v, n, i>
     message = Vsr.Message.prepare_ok(view_number, op_number, state.replica_number)
     write_line(socket, message)
 
-    %{state | client_table: client_table, op_number: op_number, log: log}
+    %{
+      state
+      | client_table: client_table,
+        op_number: op_number,
+        commit_number: commit_number,
+        log: log
+    }
   end
 
   defp handle_message(socket, _state, message) do
-    Logger.info("receive unsupported message: #{inspect(message)}")
+    Logger.warn("receive unsupported message: #{inspect(message)}")
     write_line(socket, "unsupported message type")
+  end
+
+  defp commit(state, commit_number) do
+    if commit_number != 0 && state.commit_number != commit_number - 1 do
+      Logger.warn("commit: does not contain all the earlier operations...")
+    end
+
+    # We might need to commit more than one message in our logs...
+    message_to_commit =
+      Enum.find_value(state.log, fn log ->
+        [op_number, message] = String.split(log, ":")
+
+        if String.to_integer(op_number) == commit_number do
+          message
+        else
+          false
+        end
+      end)
+
+    if message_to_commit do
+      Logger.info("committing #{commit_number}: #{message_to_commit}...")
+      {_, _, client_id, request_number} = Vsr.Message.parse(message_to_commit)
+
+      result = "result#{request_number}"
+      commit_number = state.commit_number + 1
+
+      client_table =
+        Map.update(
+          state.client_table,
+          client_id,
+          %Vsr.VRState.ClientInfo{
+            last_result: {request_number, result},
+            last_request_number: request_number
+          },
+          fn existing_client_info ->
+            %{existing_client_info | last_result: {request_number, result}}
+          end
+        )
+
+      {commit_number, client_table}
+    else
+      {state.commit_number, state.client_table}
+    end
   end
 
   defp read_line(socket) do
@@ -147,5 +220,16 @@ defmodule Vsr.Server do
 
   defp write_line(socket, message) do
     :gen_tcp.send(socket, message <> "\n")
+  end
+
+  defp to_log(op_number, message) do
+    "#{op_number}:#{message}"
+  end
+
+  defp inspect_logs(logs) do
+    for l <- logs do
+      [op_number, message] = String.split(l, ":")
+      IO.inspect(%{op_number: op_number, message: message})
+    end
   end
 end
