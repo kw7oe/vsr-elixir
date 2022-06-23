@@ -33,12 +33,23 @@ defmodule Vsr.Message do
     "start_view_change,#{v},#{i}"
   end
 
+  def do_view_change(v, vprime, n, k, i, log) do
+    log = Enum.join(log, "\t")
+    "do_view_change,#{v},#{vprime},#{n},#{k},#{i}-#{log}"
+  end
+
   def parse(string) do
     splitted =
-      if String.starts_with?(string, "prepare\t") do
-        String.split(string, "\t")
-      else
-        String.split(string, ",")
+      case string do
+        "prepare\t" <> _ ->
+          String.split(string, "\t")
+
+        "do_view_change" <> _ ->
+          [head, tail] = String.split(string, "-")
+          String.split(head, ",") ++ [tail]
+
+        _ ->
+          String.split(string, ",")
       end
 
     do_parse(splitted)
@@ -70,5 +81,10 @@ defmodule Vsr.Message do
 
   defp do_parse(["start_view_change", v, i]) do
     {:start_view_change, String.to_integer(v), String.to_integer(i)}
+  end
+
+  defp do_parse(["do_view_change", v, vprime, n, k, i, log]) do
+    {:do_view_change, String.to_integer(v), String.to_integer(vprime), String.to_integer(n),
+     String.to_integer(k), String.to_integer(i), String.split(log, "\t")}
   end
 end
