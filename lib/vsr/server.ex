@@ -273,7 +273,65 @@ defmodule Vsr.Server do
       Logger.info("receive reply from replica: #{inspect(reply)}")
     end
 
-    %{state | view_number: view_number}
+    # View Change Step 3:
+    #
+    # When the new primary receives f + 1 DOVIEWCHANGE messages from different replicas
+    # (including itself), it sets its view-number to that in the messages and selects
+    # as the new log the one contained in the message with the largest v′; if several
+    # messages have the same v′ it selects the one among them with the largest n. It
+    # sets its op-number to that of the topmost entry in the new log, sets its commit-number
+    # to the largest such number it received in the DOVIEWCHANGE mes- sages, changes its
+    # status to normal, and informs the other replicas of the completion of the view change by
+    # sending ⟨STARTVIEW v, l, n, k⟩ messages to the other replicas, where l is the new log,
+    # n is the op-number, and k is the commit-number.
+
+    # View Change Step 4:
+    #
+    # The new primary starts accepting client requests. It also executes (in order)
+    # any committed operations that it hadn’t executed previously, updates its client
+    # table, and sends the replies to the clients
+
+    %{state | status: :view_change, view_number: view_number}
+  end
+
+  defp handle_message(socket, state, {:start_view_change, v, _i}) do
+    # View Change Step 2:
+    #
+    # When replica i receives STARTVIEWCHANGE messages for its view-number
+    # from f other replicas, it sends a ⟨DOVIEWCHANGE v, l, v’, n, k, i⟩ message
+    # to the node that will be the primary in the new view. Here v is its view-number,
+    # l is its log, v′ is the view number of the latest view in which its status was
+    # normal, n is the op-number, and k is the commit- number.
+    message =
+      Vsr.Message.do_view_change(
+        v,
+        state.view_number,
+        state.op_number,
+        state.commit_number,
+        state.replica_number,
+        state.log
+      )
+
+    Logger.info("send do view change: #{inspect(message)}")
+    write_line(socket, "noop")
+    state
+  end
+
+  defp handle_message(socket, state, {:start_view, v, n, k, log}) do
+    # View Change Step 5:
+    #
+    # When other replicas receive the STARTVIEW message, they replace their
+    # log with the one in the mes- sage, set their op-number to that of the
+    # latest entry in the log, set their view-number to the view num- ber in the
+    # message, change their status to normal, and update the information in their
+    # client-table. If there are non-committed operations in the log, they send
+    # a ⟨PREPAREOK v, n, i⟩ message to the primary; here n is the op-number. Then
+    # they execute all op- erations known to be committed that they haven’t executed
+    # previously, advance their commit-number, and update the information in their
+    # client-table.
+
+    write_line(socket, "noop")
+    state
   end
 
   defp handle_message(socket, _state, message) do

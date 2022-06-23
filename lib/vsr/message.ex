@@ -38,6 +38,11 @@ defmodule Vsr.Message do
     "do_view_change,#{v},#{vprime},#{n},#{k},#{i}-#{log}"
   end
 
+  def start_view(v, n, k, log) do
+    log = Enum.join(log, "\t")
+    "start_view,#{v},#{n},#{k}-#{log}"
+  end
+
   def parse(string) do
     splitted =
       case string do
@@ -45,6 +50,10 @@ defmodule Vsr.Message do
           String.split(string, "\t")
 
         "do_view_change" <> _ ->
+          [head, tail] = String.split(string, "-")
+          String.split(head, ",") ++ [tail]
+
+        "start_view" <> _ ->
           [head, tail] = String.split(string, "-")
           String.split(head, ",") ++ [tail]
 
@@ -86,5 +95,10 @@ defmodule Vsr.Message do
   defp do_parse(["do_view_change", v, vprime, n, k, i, log]) do
     {:do_view_change, String.to_integer(v), String.to_integer(vprime), String.to_integer(n),
      String.to_integer(k), String.to_integer(i), String.split(log, "\t")}
+  end
+
+  defp do_parse(["start_view", v, n, k, log]) do
+    {:start_view, String.to_integer(v), String.to_integer(n), String.to_integer(k),
+     String.split(log, "\t")}
   end
 end

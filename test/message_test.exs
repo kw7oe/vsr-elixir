@@ -29,4 +29,18 @@ defmodule Vsr.MessageTest do
 
     assert {:do_view_change, 0, 1, 3, 3, 1, ^log} = Vsr.Message.parse(message)
   end
+
+  test "parse start_view" do
+    # Does not really represent the actual log
+    log = [
+      "1:request,op,0,1",
+      "2:reply,0,1,result",
+      "3:prepare,0,op,0,0",
+      "4:prepare_ok,0,1,0",
+      "5:commit,0,1"
+    ]
+
+    message = Vsr.Message.start_view(1, 5, 5, log)
+    assert {:start_view, 1, 5, 5, ^log} = Vsr.Message.parse(message)
+  end
 end
