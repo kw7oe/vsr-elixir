@@ -25,6 +25,14 @@ defmodule Vsr.Message do
     "commit,#{v},#{k}"
   end
 
+  def initiate_view_change() do
+    "initiate_view_change"
+  end
+
+  def start_view_change(v, i) do
+    "start_view_change,#{v},#{i}"
+  end
+
   def parse(string) do
     splitted =
       if String.starts_with?(string, "prepare\t") do
@@ -54,5 +62,13 @@ defmodule Vsr.Message do
 
   defp do_parse(["commit", v, k]) do
     {:commit, String.to_integer(v), String.to_integer(k)}
+  end
+
+  defp do_parse(["initiate_view_change"]) do
+    {:initiate_view_change}
+  end
+
+  defp do_parse(["start_view_change", v, i]) do
+    {:start_view_change, String.to_integer(v), String.to_integer(i)}
   end
 end

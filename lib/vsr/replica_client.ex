@@ -44,22 +44,9 @@ defmodule Vsr.ReplicaClient do
     {:ok, state}
   end
 
-  # Send by primary to replica upon receiving a request.
-  def prepare(client, view_number, message, op_number, commit_number) do
-    GenServer.call(
-      client,
-      {:send, Vsr.Message.prepare(view_number, message, op_number, commit_number)}
-    )
-  end
-
-  # Send by replica i to primary, to reply to the prepare message from primary.
-  def prepare_ok(client, view_number, op_number, i) do
-    GenServer.call(client, {:send, Vsr.Message.prepare_ok(view_number, op_number, i)})
-  end
-
-  # Send by primary to replica.
-  def commit(client, view_number, commit_number) do
-    GenServer.call(client, {:send, Vsr.Message.commit(view_number, commit_number)})
+  # Internal helper method to simulate a need of view change.
+  def initiate_view_change(port) do
+    send_message(port, Vsr.Message.initiate_view_change())
   end
 
   def handle_call({:send, message}, _from, state) do

@@ -12,6 +12,9 @@ defmodule Vsr.Server do
 
     replicas =
       Application.get_env(:vsr, :ports, [])
+      # The first port is always the primary port. So
+      # we can drop it.
+      |> Enum.drop(1)
       |> Enum.reject(fn p -> p == port end)
 
     loop_acceptor(socket, %{state | replicas: replicas})
@@ -134,6 +137,10 @@ defmodule Vsr.Server do
           end
         end
 
+        # We probably need to check the results:
+        #
+        # we are curently assuming that all of the successful results
+        # return prepareok correctly.
         {_count, _results} = yield_many_until.(tasks, 0, [], yield_many_until)
 
         # Step 5:
@@ -240,6 +247,33 @@ defmodule Vsr.Server do
         commit_number: commit_number,
         log: log
     }
+  end
+
+  defp handle_message(socket, state, {:initiate_view_change}) do
+    # Write to socket immediately to prevent the sender getting
+    # stuck and timeout
+    write_line(socket, "ok")
+
+    # View Change Step 1:
+    #
+    # A replica i that notices the need for a view change advances
+    # its view-number, sets its status to view- change, and sends
+    # a ⟨STARTVIEWCHANGE v, i⟩ message to the all other replicas,
+    # where v iden- tifies the new view. A replica notices the
+    # need for a view change either based on its own timer, or
+    # because it receives a STARTVIEWCHANGE or DOVIEWCHANGE
+    # message for a view with a larger number than its own
+    # view-number.
+    view_number = state.view_number + 1
+    i = state.replica_number
+    message = Vsr.Message.start_view_change(view_number, i)
+
+    for port <- state.replicas do
+      reply = Vsr.ReplicaClient.send_message(port, message)
+      Logger.info("receive reply from replica: #{inspect(reply)}")
+    end
+
+    %{state | view_number: view_number}
   end
 
   defp handle_message(socket, _state, message) do
