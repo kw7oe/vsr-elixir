@@ -19,6 +19,12 @@ defmodule Vsr.Client do
     {:ok, state}
   end
 
+  def request(op) do
+    :"client-0"
+    |> Process.whereis()
+    |> request(op)
+  end
+
   def request(client, op) do
     GenServer.call(client, {:request, op})
   end

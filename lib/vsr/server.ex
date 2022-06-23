@@ -105,7 +105,7 @@ defmodule Vsr.Server do
                   )
                 )
 
-              Logger.info("received reply from replica #{port}: #{reply}")
+              Logger.info("received reply from replica #{port}: #{inspect(reply)}")
               reply
             end)
           end)
@@ -119,8 +119,8 @@ defmodule Vsr.Server do
           results =
             Task.yield_many(tasks, 100)
             |> Enum.filter(fn {_, res} -> res end)
-            |> Enum.reduce(results, fn {_, {status, res}}, results ->
-              if status == :ok do
+            |> Enum.reduce(results, fn {_, {s1, {s2, res}}}, results ->
+              if s1 == :ok && s2 == :ok do
                 [res | results]
               else
                 results

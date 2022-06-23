@@ -2,7 +2,9 @@ defmodule Vsr.ReplicaClient do
   use GenServer
   require Logger
 
-  def send_message(port, message) do
+  @max_retry 5
+
+  def send_message(port, message, retry \\ 0) do
     # TODO: Check if a race condition is possible.
 
     # This might not be a good pattern to lazily initiate a connection.
@@ -10,13 +12,22 @@ defmodule Vsr.ReplicaClient do
     # implementation.
     case Process.whereis(:"replica-client-#{port}") do
       nil ->
-        Logger.info("replica client for port #{port} not started yet, starting it now...")
+        # Logger.info("replica client for port #{port} not started yet, starting it now...")
         DynamicSupervisor.start_child(Vsr.DynamicSupervisor, {__MODULE__, %{port: port}})
-        Process.sleep(200)
-        send_message(port, message)
+
+        # Exponential backoff before retry
+        base_ms = 100
+        duration = base_ms * 2 ** retry
+        Process.sleep(duration)
+
+        if retry == @max_retry do
+          {:error, :replica_offline}
+        else
+          send_message(port, message, retry + 1)
+        end
 
       pid ->
-        GenServer.call(pid, {:send, message})
+        {:ok, GenServer.call(pid, {:send, message})}
     end
   end
 
