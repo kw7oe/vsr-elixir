@@ -49,11 +49,11 @@ defmodule Vsr.Message do
         "prepare\t" <> _ ->
           String.split(string, "\t")
 
-        "do_view_change" <> _ ->
+        "do_view_change," <> _ ->
           [head, tail] = String.split(string, "-")
           String.split(head, ",") ++ [tail]
 
-        "start_view" <> _ ->
+        "start_view," <> _ ->
           [head, tail] = String.split(string, "-")
           String.split(head, ",") ++ [tail]
 

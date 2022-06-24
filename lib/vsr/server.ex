@@ -269,6 +269,7 @@ defmodule Vsr.Server do
     message = Vsr.Message.start_view_change(view_number, i)
 
     for port <- state.replicas do
+      Logger.info("sending to #{port}")
       reply = Vsr.ReplicaClient.send_message(port, message)
       Logger.info("receive reply from replica: #{inspect(reply)}")
     end
@@ -294,7 +295,8 @@ defmodule Vsr.Server do
     %{state | status: :view_change, view_number: view_number}
   end
 
-  defp handle_message(socket, state, {:start_view_change, v, _i}) do
+  defp handle_message(socket, state, {:start_view_change, v, i}) do
+    Logger.info("start view change requested from replica #{i}")
     # View Change Step 2:
     #
     # When replica i receives STARTVIEWCHANGE messages for its view-number
@@ -313,7 +315,7 @@ defmodule Vsr.Server do
       )
 
     Logger.info("send do view change: #{inspect(message)}")
-    write_line(socket, "noop")
+    write_line(socket, "ok")
     state
   end
 
