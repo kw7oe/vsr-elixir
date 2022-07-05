@@ -13,6 +13,7 @@ defmodule Vsr.Application do
     children = [
       {Task.Supervisor, name: Vsr.TaskSupervisor},
       {DynamicSupervisor, strategy: :one_for_one, name: Vsr.DynamicSupervisor},
+      {State, %{}},
       Supervisor.child_spec({Task, fn -> Vsr.Server.accept(port, replica_number) end},
         restart: :permanent
       ),

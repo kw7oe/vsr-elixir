@@ -1,5 +1,6 @@
 defmodule Vsr.Server do
   require Logger
+  alias State
 
   def accept(port, replica_number) do
     state = %Vsr.VRState{replica_number: replica_number}
@@ -17,32 +18,33 @@ defmodule Vsr.Server do
       |> Enum.drop(1)
       |> Enum.reject(fn p -> p == port end)
 
-    loop_acceptor(socket, %{state | replicas: replicas})
+    state = %{state | replicas: replicas}
+
+    State.put(state)
+    loop_acceptor(socket)
   end
 
-  defp loop_acceptor(socket, state) do
+  defp loop_acceptor(socket) do
     {:ok, client} = :gen_tcp.accept(socket)
-    # {:ok, pid} = Task.Supervisor.start_child(Vsr.TaskSupervisor, fn -> serve(client) end)
-    # :ok = :gen_tcp.controlling_process(client, pid)
-    state = serve(client, state)
-    loop_acceptor(socket, state)
+    {:ok, pid} = Task.Supervisor.start_child(Vsr.TaskSupervisor, fn -> serve(client) end)
+    :ok = :gen_tcp.controlling_process(client, pid)
+    loop_acceptor(socket)
   end
 
-  defp serve(socket, state) do
+  defp serve(socket) do
     case read_line(socket) do
       {:ok, data} ->
         message = Vsr.Message.parse(String.trim(data))
-        state = handle_message(socket, state, message)
-        serve(socket, state)
+        handle_message(socket, message)
+        serve(socket)
 
       _ ->
         Logger.debug("connection closed")
     end
-
-    state
   end
 
-  defp handle_message(socket, state, {:request, _op, client_id, request_number} = request) do
+  defp handle_message(socket, {:request, _op, client_id, request_number} = request) do
+    state = State.get()
     client_info = Map.get(state.client_table, client_id, %Vsr.VRState.ClientInfo{})
     Logger.info(%{state: state, client_info: client_info})
 
@@ -171,16 +173,15 @@ defmodule Vsr.Server do
           })
 
         # Update state
-        %{
+        state = %{
           state
           | client_table: client_table,
             op_number: op_number,
             commit_number: commit_number,
             log: log
         }
+        State.put(state)
       end
-
-    state
   end
 
   # Commit number is included in prepare message to inform replica about
@@ -188,7 +189,8 @@ defmodule Vsr.Server do
   #
   # If primary does not receive any client request in a timely way,
   # it will instead inform the replica by sending a <Commit v, k> message.
-  defp handle_message(socket, state, {:prepare, view_number, message, op_number, commit_number}) do
+  defp handle_message(socket, {:prepare, view_number, message, op_number, commit_number}) do
+    state = State.get()
     Logger.info(%{state: state, op_number: op_number, commit_number: commit_number})
 
     # Commit
@@ -240,16 +242,18 @@ defmodule Vsr.Server do
     message = Vsr.Message.prepare_ok(view_number, op_number, state.replica_number)
     write_line(socket, message)
 
-    %{
+    state = %{
       state
       | client_table: client_table,
         op_number: op_number,
         commit_number: commit_number,
         log: log
     }
+    State.put(state)
   end
 
-  defp handle_message(socket, state, {:initiate_view_change}) do
+  defp handle_message(socket, {:initiate_view_change}) do
+    state = State.get()
     # Write to socket immediately to prevent the sender getting
     # stuck and timeout
     write_line(socket, "ok")
@@ -292,10 +296,11 @@ defmodule Vsr.Server do
     # any committed operations that it hadn’t executed previously, updates its client
     # table, and sends the replies to the clients
 
-    %{state | status: :view_change, view_number: view_number}
+    State.put(%{state | status: :view_change, view_number: view_number})
   end
 
-  defp handle_message(socket, state, {:start_view_change, v, i}) do
+  defp handle_message(socket, {:start_view_change, v, i}) do
+    state = State.get()
     Logger.info("start view change requested from replica #{i}")
     # View Change Step 2:
     #
@@ -316,10 +321,10 @@ defmodule Vsr.Server do
 
     Logger.info("send do view change: #{inspect(message)}")
     write_line(socket, "ok")
-    state
   end
 
-  defp handle_message(socket, state, {:start_view, v, n, k, log}) do
+  defp handle_message(socket, {:start_view, v, n, k, log}) do
+    state = State.get()
     # View Change Step 5:
     #
     # When other replicas receive the STARTVIEW message, they replace their
@@ -333,7 +338,6 @@ defmodule Vsr.Server do
     # client-table.
 
     write_line(socket, "noop")
-    state
   end
 
   defp handle_message(socket, _state, message) do
